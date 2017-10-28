@@ -363,7 +363,7 @@ class Config
         $handle = fopen('php://stdin', 'r');
 
         // Check for content on STDIN.
-        if (($this->stdin === true) || ((posix_isatty($handle) === false) && (feof($handle) === false))) {
+        if (($this->stdin === true) || (($this->isStdinATTY() === false) && (feof($handle) === false))) {
             $fileContents = stream_get_contents($handle);
 
             if (trim($fileContents) !== '') {
@@ -377,6 +377,62 @@ class Config
         fclose($handle);
 
     }//end __construct()
+
+
+    /**
+     * Check if STDIN is a TTY.
+     *
+     * @return bool
+     */
+    protected function isStdinATTY()
+    {
+        // The check is slow (especially calling `tty`) so we static
+        // cache the result.
+        static $isStdin = null;
+
+        if ($isStdin !== null) {
+            return $isStdin;
+        }
+
+        // If PHP has the POSIX extensions we will use them.
+        if (function_exists('posix_isatty') === true) {
+            $isStdin = (posix_isatty(STDIN) === true);
+
+            return $isStdin;
+        }
+
+        // Next try is detecting whether we have `tty` installed and use that.
+        if (defined('PHP_WINDOWS_VERSION_PLATFORM') === true) {
+            $devnull = 'NUL';
+            $which   = 'where';
+        } else {
+            $devnull = '/dev/null';
+            $which   = 'which';
+        }
+
+        if (empty(trim(shell_exec("$which tty 2> $devnull"))) === false) {
+            exec("tty -s 2> $devnull", $output, $returnValue);
+            $isStdin = ($returnValue === 0);
+
+            return $isStdin;
+        }
+
+        // Finally we will use fstat.  The solution borrowed from
+        // https://stackoverflow.com/questions/11327367/detect-if-a-php-script-is-being-run-interactively-or-not
+        // This doesn't work on Mingw/Cygwin/... using Mintty but they
+        // have `tty` installed.
+        $type = array(
+                 'S_IFMT'  => 0170000,
+                 'S_IFIFO' => 0010000,
+                );
+
+        $stat    = fstat(STDIN);
+        $mode    = ($stat['mode'] & $type['S_IFMT']);
+        $isStdin = ($mode !== $type['S_IFIFO']);
+
+        return $isStdin;
+
+    }//end isStdinATTY()
 
 
     /**
